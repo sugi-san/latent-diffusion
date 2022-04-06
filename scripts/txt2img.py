@@ -16,9 +16,9 @@ from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 
 
-def load_model_from_config(config, ckpt, verbose=False):
+def load_model_from_config(config, ckpt, device_name='cpu', verbose=False):
     print(f"Loading model from {ckpt}")
-    pl_sd = torch.load(ckpt, map_location="cuda:0")
+    pl_sd = torch.load(ckpt, map_location='cuda:0' if device_name == 'cuda' else 'cpu')
     sd = pl_sd["state_dict"]
     model = instantiate_from_config(config.model)
     m, u = model.load_state_dict(sd, strict=False)
@@ -29,7 +29,8 @@ def load_model_from_config(config, ckpt, verbose=False):
         print("unexpected keys:")
         print(u)
 
-    model.half().cuda()
+    if device_name == 'cuda':
+        model.half().cuda()
     model.eval()
     return model
 
@@ -107,13 +108,16 @@ if __name__ == "__main__":
     )
     opt = parser.parse_args()
 
-    torch.cuda.empty_cache()
+    device_name = 'cpu'
+    if torch.cuda.is_available():
+        device_name = 'cuda'
+        torch.cuda.empty_cache()
     gc.collect()
 
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-eval.yaml")  # TODO: Optionally download from same location as ckpt and chnage this logic
-    model = load_model_from_config(config, "models/ldm/text2img-large/model.ckpt")  # TODO: check path
+    model = load_model_from_config(config, "models/ldm/text2img-large/model.ckpt", device_name=device_name)  # TODO: check path
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device(device_name)
     model = model.to(device)
 
     if opt.plms:
@@ -130,11 +134,11 @@ if __name__ == "__main__":
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
-    base_count = len(os.listdir(sample_path))
-
+    
     all_samples=list()
     with torch.no_grad():
-        with torch.cuda.amp.autocast():
+        def sample():
+            base_count = len(os.listdir(sample_path))
             with model.ema_scope():
                 uc = None
                 if opt.scale != 1.0:
@@ -159,7 +163,11 @@ if __name__ == "__main__":
                         Image.fromarray(x_sample.astype(np.uint8)).save(os.path.join(sample_path, f"{base_count:04}.png"))
                         base_count += 1
                     all_samples.append(x_samples_ddim)
-
+        if device_name == 'cuda':
+            with torch.cuda.amp.autocast():
+                sample()
+        else:
+            sample()
 
     # additionally, save as grid
     grid = torch.stack(all_samples, 0)
