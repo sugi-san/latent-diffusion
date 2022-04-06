@@ -134,11 +134,11 @@ if __name__ == "__main__":
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
-    
+    base_count = len(os.listdir(sample_path))
+            
     all_samples=list()
     with torch.no_grad():
-        def sample():
-            base_count = len(os.listdir(sample_path))
+        with torch.autocast(device_name):
             with model.ema_scope():
                 uc = None
                 if opt.scale != 1.0:
@@ -163,12 +163,7 @@ if __name__ == "__main__":
                         Image.fromarray(x_sample.astype(np.uint8)).save(os.path.join(sample_path, f"{base_count:04}.png"))
                         base_count += 1
                     all_samples.append(x_samples_ddim)
-        if device_name == 'cuda':
-            with torch.cuda.amp.autocast():
-                sample()
-        else:
-            sample()
-
+        
     # additionally, save as grid
     grid = torch.stack(all_samples, 0)
     grid = rearrange(grid, 'n b c h w -> (n b) c h w')
